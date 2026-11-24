@@ -44,6 +44,31 @@ def _round(number, opponent, *, side="defender", operator=True, position=None, c
 
 
 class DashboardDataTests(unittest.TestCase):
+    def test_multi_match_area_uses_only_the_first_two_matches(self):
+        rounds, matches = dashboard._multi_match_sample()
+        study = dashboard.build_match_study(rounds, matches)
+        reference_sources = list(matches)[:2]
+        references = [row for row in rounds if row.source in reference_sources]
+        reference_only = dashboard.build_match_study(references, matches)
+
+        self.assertEqual(reference_only.circle, study.circle)
+        self.assertEqual(list(matches.values())[2:], list(study.scored_matches))
+        self.assertEqual(6, sum(len(rows) for rows in study.scored_matches.values()))
+        self.assertEqual(2, sum(row.result == "hit" for rows in study.scored_matches.values() for row in rows))
+
+    def test_g2_reveal_uses_real_feeds_when_available(self):
+        from streamlit.testing.v1 import AppTest
+
+        if any(not (Path.cwd() / feed.filename).is_file() for feed in dashboard.G2_FEEDS):
+            self.skipTest("G2 GRID feeds are required for this integration test")
+        app = AppTest.from_file(str(Path(__file__).with_name("dashboard.py")), default_timeout=120).run()
+        app.radio[0].set_value("jawgemo / G2").run()
+        self.assertFalse(app.exception)
+        self.assertFalse(app.metric)
+        app.checkbox[0].check().run()
+        self.assertEqual("0 of 12", app.metric[0].value)
+        self.assertFalse(app.exception)
+
     def test_grid_positions_project_to_split_minimap_coordinates(self):
         projected = _project_grid_position((-3142.589743589744, -6354.974358974359))
 
@@ -53,7 +78,7 @@ class DashboardDataTests(unittest.TestCase):
     def test_sentinels_contacts_never_change_reference_area_fit(self):
         references = [
             _round(1, "Evil Geniuses", position=(0.0, 0.0)),
-            _round(2, "KRÜ", position=(100.0, 0.0)),
+            _round(2, "KR�", position=(100.0, 0.0)),
         ]
         sentinel = _round(9, "Sentinels", position=(100000.0, 100000.0))
 
@@ -83,7 +108,7 @@ class DashboardDataTests(unittest.TestCase):
     def test_invented_sample_rounds_demonstrate_hit_miss_and_unobserved_contact(self):
         data = build_dashboard_data(dashboard._sample_rounds())
 
-        self.assertEqual(["Sample Evil Geniuses", "Sample KRÜ"], [row.opponent for row in data.reference_rounds])
+        self.assertEqual(["Sample Evil Geniuses", "Sample KR�"], [row.opponent for row in data.reference_rounds])
         self.assertEqual(2, data.circle.coverage_count)
         self.assertEqual(list(range(5, 11)), [row.record.number for row in data.revealed_rounds])
         self.assertEqual(2, sum(row.result == "hit" for row in data.revealed_eligible_rounds))
@@ -201,7 +226,7 @@ class DashboardInteractionTests(unittest.TestCase):
                 next(button for button in app.button if button.key == "reveal_sentinels").click().run()
                 self.assertFalse(app.exception)
                 self.assertTrue(any("2 of 6" in str(metric.value) for metric in app.metric))
-                self.assertTrue(any("Sample Sentinels · Rounds 5–10 (invented)" in item.value for item in app.markdown))
+                self.assertTrue(any("Sample Sentinels � Rounds 5-10 (invented)" in item.value for item in app.markdown))
                 next(button for button in app.button if button.key == "select_round_9").click().run()
 
                 selected_figure = json.loads(app.get("plotly_chart")[0].proto.spec)
@@ -290,7 +315,7 @@ class DashboardInteractionTests(unittest.TestCase):
 
         next(button for button in app.button if button.key == "reveal_sentinels").click().run()
         self.assertTrue(any("1 of 6" in str(metric.value) for metric in app.metric))
-        self.assertTrue(any("Sentinels · Rounds 5–10" in item.value for item in app.markdown))
+        self.assertTrue(any("Sentinels � Rounds 5-10" in item.value for item in app.markdown))
         revealed_figure = json.loads(app.get("plotly_chart")[0].proto.spec)
         self.assertFalse(any("Selected Sentinels" in trace.get("name", "") for trace in revealed_figure["data"]))
         next(button for button in app.button if button.key == "select_round_9").click().run()

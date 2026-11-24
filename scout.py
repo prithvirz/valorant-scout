@@ -141,7 +141,7 @@ def _player_position(player: dict) -> tuple[float, float] | None:
         return None
 
 
-def _round_from_start(event: dict, occurred_at: datetime | None, source: str) -> RoundRecord | None:
+def _round_from_start(event: dict, occurred_at: datetime | None, source: str, player_key: str) -> RoundRecord | None:
     actor = event.get("actor") or {}
     game_state = actor.get("state") or {}
     target = event.get("target") or {}
@@ -154,7 +154,7 @@ def _round_from_start(event: dict, occurred_at: datetime | None, source: str) ->
     dgz_player = None
     for team in teams:
         for player in team.get("players") or []:
-            if _normalized_text(_label(player.get("name"))) == "dgz":
+            if _normalized_text(_label(player.get("name"))) == player_key:
                 dgz_team = team
                 dgz_player = player
                 break
@@ -195,13 +195,13 @@ def _find_round(rounds: list[RoundRecord], current: RoundRecord | None, round_id
     return None
 
 
-def _update_side_from_barrier(record: RoundRecord, event: dict) -> None:
+def _update_side_from_barrier(record: RoundRecord, event: dict, player_key: str) -> None:
     actor_state = (event.get("actor") or {}).get("state") or {}
     barrier_inventory = None
     for team in actor_state.get("teams") or []:
         for player in team.get("players") or []:
             player_id, name, _, _, _ = _player_details(player)
-            if player_id == record.dgz_id or _normalized_text(name) == "dgz":
+            if player_id == record.dgz_id or _normalized_text(name) == player_key:
                 record.side = _key(team.get("side") or record.side)
                 record.dgz_team = _label(team.get("name") or record.dgz_team)
                 barrier_inventory = _inventory_from_player(player)
@@ -225,17 +225,17 @@ def _update_side_from_barrier(record: RoundRecord, event: dict) -> None:
     for team in matching_game.get("teams") or []:
         for player in team.get("players") or []:
             player_id, name, _, _, _ = _player_details(player)
-            if player_id == record.dgz_id or _normalized_text(name) == "dgz":
+            if player_id == record.dgz_id or _normalized_text(name) == player_key:
                 record.inventory = _inventory_from_player(player)
                 return
 
     record.inventory = None
 
 
-def _update_inventory(record: RoundRecord, event: dict) -> None:
+def _update_inventory(record: RoundRecord, event: dict, player_key: str) -> None:
     actor = event.get("actor") or {}
     player_id, name, _, _, _ = _player_details(actor)
-    if player_id != record.dgz_id and _normalized_text(name) != "dgz":
+    if player_id != record.dgz_id and _normalized_text(name) != player_key:
         return
     inventory = _inventory_from_player(actor)
     if inventory is not None:
@@ -270,7 +270,14 @@ def _set_first_contact(record: RoundRecord, event: dict, occurred_at: datetime, 
         record.contact = contact
 
 
-def analyze_envelopes(envelopes: Iterable[dict], source: str = "<input>", window_seconds: float = DEFAULT_WINDOW_SECONDS) -> list[RoundRecord]:
+def analyze_envelopes(
+    envelopes: Iterable[dict],
+    source: str = "<input>",
+    window_seconds: float = DEFAULT_WINDOW_SECONDS,
+    *,
+    player_name: str = "DGZ",
+) -> list[RoundRecord]:
+    player_key = _normalized_text(player_name)
     rounds: list[RoundRecord] = []
     current: RoundRecord | None = None
 
@@ -284,10 +291,10 @@ def analyze_envelopes(envelopes: Iterable[dict], source: str = "<input>", window
             event_type = event.get("type")
 
             if event_type == "game-started-round":
-                record = _round_from_start(event, occurred_at, source)
+                record = _round_from_start(event, occurred_at, source, player_key)
+                current = record
                 if record is not None:
                     rounds.append(record)
-                    current = record
                 continue
 
             if event_type == "round-ended-freezetime":
@@ -296,13 +303,13 @@ def analyze_envelopes(envelopes: Iterable[dict], source: str = "<input>", window
                 if record is not None:
                     record.barrier_seen = True
                     record.barrier_drop = occurred_at
-                    _update_side_from_barrier(record, event)
+                    _update_side_from_barrier(record, event, player_key)
                     record.operator_at_drop = _has_operator(record.inventory)
                 continue
 
             if event_type in ("player-pickedUp-item", "player-dropped-item"):
                 if current is not None and not current.barrier_seen:
-                    _update_inventory(current, event)
+                    _update_inventory(current, event, player_key)
                 continue
 
             if event_type == "player-damaged-player" and current is not None and occurred_at is not None:
@@ -337,8 +344,13 @@ def _iter_envelopes(path: Path) -> Iterable[dict]:
             yield envelope
 
 
-def load_rounds(path: Path, window_seconds: float = DEFAULT_WINDOW_SECONDS) -> list[RoundRecord]:
-    return analyze_envelopes(_iter_envelopes(path), path.name, window_seconds)
+def load_rounds(
+    path: Path,
+    window_seconds: float = DEFAULT_WINDOW_SECONDS,
+    *,
+    player_name: str = "DGZ",
+) -> list[RoundRecord]:
+    return analyze_envelopes(_iter_envelopes(path), path.name, window_seconds, player_name=player_name)
 
 
 def _is_split(record: RoundRecord) -> bool:
@@ -464,7 +476,7 @@ def print_report(
     radius_units = radius_meters * MAP_UNITS_PER_METER
 
     print(
-        f"Reference evidence (Evil Geniuses and KRÜ; Split; DGZ defending with Operator at barrier drop; "
+        f"Reference evidence (Evil Geniuses and KR�; Split; DGZ defending with Operator at barrier drop; "
         f"damage contact within {window_seconds:g}s):",
         file=output,
     )
@@ -495,7 +507,7 @@ def print_report(
         side_and_loadout += "Operator" if record.operator_at_drop is True else (
             "inventory unknown" if record.operator_at_drop is None else "no Operator"
         )
-        distance_label = f"{distance / MAP_UNITS_PER_METER:.2f}m" if distance is not None else "—"
+        distance_label = f"{distance / MAP_UNITS_PER_METER:.2f}m" if distance is not None else "-"
         print(
             f"  {record.number:>5} | {side_and_loadout:<24} | {_format_contact(record)} | "
             f"{distance_label:>8} | {result} | {record.winner or 'unknown'}",
@@ -550,7 +562,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if not select_reference_rounds(rounds):
-        print("No Split DGZ defense rounds with an Operator were found against Evil Geniuses or KRÜ.", file=sys.stderr)
+        print("No Split DGZ defense rounds with an Operator were found against Evil Geniuses or KR�.", file=sys.stderr)
         return 2
     if not select_sentinels_rounds(rounds):
         print("No Split rounds against Sentinels were found.", file=sys.stderr)

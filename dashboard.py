@@ -1,10 +1,10 @@
-"""Streamlit dashboard for DGZ's locked Split contact area."""
+"""Streamlit dashboard for testing locked first-contact areas on Split."""
 
 from __future__ import annotations
 
 import base64
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -12,7 +12,7 @@ import plotly.graph_objects as go
 import streamlit as st
 import zstandard
 
-from fetch_demo_data import FEEDS, FETCH_COMMAND
+from fetch_demo_data import FEEDS, FETCH_COMMAND, G2_FEEDS, G2_FETCH_COMMAND
 from scout import (
     DEFAULT_RADIUS_METERS,
     DEFAULT_WINDOW_SECONDS,
@@ -33,6 +33,19 @@ SPLIT_MAP_IMAGE = Path(__file__).with_name("split_minimap.png")
 MAP_U_OFFSET = 0.842188
 MAP_V_OFFSET = 0.697578
 MAP_COORDINATE_SCALE = 0.000078
+G2_MATCHES = dict(
+    zip(
+        (feed.filename for feed in G2_FEEDS),
+        (
+            "Apr 26 � Sentinels",
+            "Apr 28 � 100 Thieves",
+            "May 3 � Evil Geniuses",
+            "May 3 � MIBR",
+            "May 4 � Sentinels",
+        ),
+        strict=True,
+    )
+)
 
 
 @dataclass(frozen=True)
@@ -51,6 +64,14 @@ class DashboardData:
     revealed_rounds: list[ScoredRound]
     eligible_rounds: list[ScoredRound]
     revealed_eligible_rounds: list[ScoredRound]
+
+
+@dataclass(frozen=True)
+class MatchStudy:
+    reference_rounds: list[RoundRecord]
+    circle: Circle | None
+    reference_counts: dict[str, int]
+    scored_matches: dict[str, list[ScoredRound]]
 
 
 def _round_sort_key(record: RoundRecord) -> tuple[str, str, int, str]:
@@ -93,16 +114,20 @@ def build_dashboard_data(
 
 
 @st.cache_data(show_spinner=False)
-def _load_cached(path: str, modified_ns: int, size: int, window_seconds: float) -> list[RoundRecord]:
+def _load_cached(
+    path: str, modified_ns: int, size: int, window_seconds: float, player_name: str = "DGZ"
+) -> list[RoundRecord]:
     del modified_ns, size
-    return load_rounds(Path(path), window_seconds)
+    return load_rounds(Path(path), window_seconds, player_name=player_name)
 
 
-def _load_rounds(paths: list[Path]) -> list[RoundRecord]:
+def _load_rounds(paths: list[Path], player_name: str = "DGZ") -> list[RoundRecord]:
     rounds: list[RoundRecord] = []
     for path in paths:
         stat = path.stat()
-        rounds.extend(_load_cached(str(path.resolve()), stat.st_mtime_ns, stat.st_size, DEFAULT_WINDOW_SECONDS))
+        rounds.extend(
+            _load_cached(str(path.resolve()), stat.st_mtime_ns, stat.st_size, DEFAULT_WINDOW_SECONDS, player_name)
+        )
     return rounds
 
 
@@ -149,7 +174,7 @@ def _sample_rounds() -> list[RoundRecord]:
 
     return [
         make_round(1, "Sample Evil Geniuses", (0.0, 0.0)),
-        make_round(2, "Sample KRÜ", (400.0, 0.0)),
+        make_round(2, "Sample KR�", (400.0, 0.0)),
         make_round(5, "Sample Sentinels", (100.0, 0.0)),
         make_round(6, "Sample Sentinels", (4000.0, 4000.0)),
         make_round(7, "Sample Sentinels", None, contact_observed=False),
@@ -168,9 +193,9 @@ def _contact_label(record: RoundRecord) -> str:
     if record.contact is None:
         return "No observed contact"
     if record.contact.position is None:
-        return f"{_timestamp_label(record.contact.occurred_at)} · position unavailable"
+        return f"{_timestamp_label(record.contact.occurred_at)} � position unavailable"
     x, y = record.contact.position
-    return f"{_timestamp_label(record.contact.occurred_at)} · ({x:.1f}, {y:.1f})"
+    return f"{_timestamp_label(record.contact.occurred_at)} � ({x:.1f}, {y:.1f})"
 
 
 def _elapsed_after_barrier_label(record: RoundRecord) -> str:
@@ -190,7 +215,7 @@ def _elapsed_after_barrier_label(record: RoundRecord) -> str:
     return f"{elapsed_label} {unit} after barrier drop"
 
 
-def _circle_figure(data: DashboardData, selected_round: ScoredRound | None = None) -> go.Figure:
+def _circle_figure(data: DashboardData | MatchStudy, selected_round: ScoredRound | None = None) -> go.Figure:
     circle = data.circle
     assert circle is not None
     center = _project_grid_position(circle.center)
@@ -239,7 +264,7 @@ def _circle_figure(data: DashboardData, selected_round: ScoredRound | None = Non
                     for record in records
                 ],
                 hovertemplate=(
-                    "%{customdata[1]} · Round %{customdata[0]}<br>"
+                    "%{customdata[1]} � Round %{customdata[0]}<br>"
                     "GRID (%{customdata[3]:.1f}, %{customdata[4]:.1f}) map units<br>"
                     "%{customdata[2]}<extra></extra>"
                 ),
@@ -289,7 +314,7 @@ def _circle_figure(data: DashboardData, selected_round: ScoredRound | None = Non
                     "line": {"color": "#f8fafc", "width": 2},
                 },
                 customdata=[[grid_position[0], grid_position[1]]],
-                hovertemplate="Selected Sentinels contact<br>GRID (%{customdata[0]:.1f}, %{customdata[1]:.1f}) map units<extra></extra>",
+                hovertemplate="Selected contact<br>GRID (%{customdata[0]:.1f}, %{customdata[1]:.1f}) map units<extra></extra>",
             )
         )
     axis_min = min(extent_values)
@@ -346,10 +371,10 @@ def _round_row(row: ScoredRound) -> dict[str, object]:
     loadout = "Operator" if record.operator_at_drop is True else (
         "Inventory unknown" if record.operator_at_drop is None else "No Operator"
     )
-    distance = f"{row.distance_units / MAP_UNITS_PER_METER:.2f} m" if row.distance_units is not None else "—"
+    distance = f"{row.distance_units / MAP_UNITS_PER_METER:.2f} m" if row.distance_units is not None else "-"
     return {
         "Round": record.number,
-        "Side / loadout": f"{record.side.title() or 'Unknown'} · {loadout}",
+        "Side / loadout": f"{record.side.title() or 'Unknown'} � {loadout}",
         "First contact": _contact_label(record),
         "Distance": distance,
         "Result": row.result.title(),
@@ -357,12 +382,12 @@ def _round_row(row: ScoredRound) -> dict[str, object]:
     }
 
 
-def _render_round_detail(row: ScoredRound) -> None:
+def _render_round_detail(row: ScoredRound, player_label: str = "DGZ") -> None:
     record = row.record
     st.markdown(f"#### Round {record.number} detail")
     if record.contact is None:
         st.markdown("**First damage timestamp:** No observed contact")
-        st.markdown("**DGZ position:** Unavailable")
+        st.markdown(f"**{player_label} position:** Unavailable")
     else:
         st.markdown(f"**First damage timestamp:** {_timestamp_label(record.contact.occurred_at)}")
         st.markdown(f"**Time after barrier drop:** {_elapsed_after_barrier_label(record)}")
@@ -371,21 +396,21 @@ def _render_round_detail(row: ScoredRound) -> None:
         else:
             x, y = record.contact.position
             position = f"({x:.1f}, {y:.1f}) map units"
-        st.markdown(f"**DGZ position:** {position}")
+        st.markdown(f"**{player_label} position:** {position}")
         st.markdown(f"**Opponent:** {record.contact.opponent}")
-    st.markdown(f"**Result:** {row.result.title()} · **Round winner:** {record.winner or 'Unknown'}")
+    st.markdown(f"**Result:** {row.result.title()} � **Round winner:** {record.winner or 'Unknown'}")
 
 
 def _render_dashboard(data: DashboardData, sample_mode: bool = False) -> None:
-    st.title("DGZ on Split · Sample match" if sample_mode else "DGZ on Split")
+    st.title("DGZ on Split � Sample match" if sample_mode else "DGZ on Split")
     if sample_mode:
-        st.warning("SAMPLE MATCH — all teams, rounds, timestamps, and positions below are invented for demonstration.")
-        st.caption("Fictional EG / KRÜ reference rounds lock the area; a fictional Sentinels match is scored without refitting.")
+        st.warning("SAMPLE MATCH - all teams, rounds, timestamps, and positions below are invented for demonstration.")
+        st.caption("Fictional EG / KR� reference rounds lock the area; a fictional Sentinels match is scored without refitting.")
     else:
-        st.caption("EG / KRÜ establish the locked area; Sentinels are scored against it without refitting.")
+        st.caption("EG / KR� establish the locked area; Sentinels are scored against it without refitting.")
 
     if data.circle is None:
-        st.error("No located EG / KRÜ reference contacts are available to lock the area.")
+        st.error("No located EG / KR� reference contacts are available to lock the area.")
         return
 
     hits = sum(row.result == "hit" for row in data.revealed_eligible_rounds)
@@ -411,7 +436,7 @@ def _render_dashboard(data: DashboardData, sample_mode: bool = False) -> None:
             config={"displayModeBar": False},
         )
     with evidence_column:
-        st.markdown("#### Invented EG / KRÜ reference evidence" if sample_mode else "#### EG / KRÜ evidence")
+        st.markdown("#### Invented EG / KR� reference evidence" if sample_mode else "#### EG / KR� evidence")
         evidence = []
         for record in data.reference_rounds:
             evidence.append(
@@ -434,7 +459,7 @@ def _render_dashboard(data: DashboardData, sample_mode: bool = False) -> None:
             st.dataframe(evidence, hide_index=True, use_container_width=True, height=300)
         else:
             st.info("No qualifying reference rounds found.")
-        st.caption("● Inside locked area · × Outside locked area")
+        st.caption("? Inside locked area � x Outside locked area")
 
     st.divider()
     reveal_label = "Reveal Sample match" if sample_mode else "Reveal Sentinels match"
@@ -448,9 +473,9 @@ def _render_dashboard(data: DashboardData, sample_mode: bool = False) -> None:
         st.caption(hidden_label)
         return
 
-    st.markdown("### Sample Sentinels · Rounds 5–10 (invented)" if sample_mode else "### Sentinels · Rounds 5–10")
+    st.markdown("### Sample Sentinels � Rounds 5-10 (invented)" if sample_mode else "### Sentinels � Rounds 5-10")
     if not data.revealed_rounds:
-        st.info("No Sentinels rounds 5–10 were found in the supplied feeds." if not sample_mode else "No invented sample rounds are available.")
+        st.info("No Sentinels rounds 5-10 were found in the supplied feeds." if not sample_mode else "No invented sample rounds are available.")
         return
 
     metric_columns = st.columns(3)
@@ -458,12 +483,12 @@ def _render_dashboard(data: DashboardData, sample_mode: bool = False) -> None:
     metric_columns[1].metric(
         "Reference coverage",
         f"{data.circle.coverage_count} / {len(data.reference_points)}",
-        "located EG / KRÜ contacts",
+        "located EG / KR� contacts",
     )
     metric_columns[2].metric(
         "Eligible rounds hit",
         f"{hits} of {len(data.revealed_eligible_rounds)}",
-        f"{misses} misses · {no_contact} no contact · {unlocated} unlocated",
+        f"{misses} misses � {no_contact} no contact � {unlocated} unlocated",
     )
 
     st.dataframe([_round_row(row) for row in data.revealed_rounds], hide_index=True, use_container_width=True)
@@ -507,9 +532,123 @@ def _set_dashboard_mode(mode: str) -> None:
         st.session_state.pop("selected_round_number", None)
 
 
+def build_match_study(rounds: list[RoundRecord], matches: dict[str, str]) -> MatchStudy:
+    eligible = {source: [] for source in matches}
+    for record in sorted(rounds, key=_round_sort_key):
+        if (
+            record.source in eligible
+            and record.map_name.casefold() == "split"
+            and record.side == "defender"
+            and record.operator_at_drop is True
+            and record.barrier_drop is not None
+        ):
+            eligible[record.source].append(record)
+
+    reference_ids = list(matches)[:2]
+    reference_rounds = [record for source in reference_ids for record in eligible[source]]
+    radius = DEFAULT_RADIUS_METERS * MAP_UNITS_PER_METER
+    circle = best_circle(
+        [record.contact.position for record in reference_rounds if record.contact and record.contact.position],
+        radius,
+    )
+    reference_counts = {matches[source]: len(eligible[source]) for source in reference_ids}
+    scored = {
+        matches[source]: [ScoredRound(record, *score_round(record, circle, radius)) for record in eligible[source]]
+        for source in list(matches)[2:]
+    } if circle is not None else {}
+    return MatchStudy(reference_rounds, circle, reference_counts, scored)
+
+
+def _multi_match_sample() -> tuple[list[RoundRecord], dict[str, str]]:
+    originals = _sample_rounds()
+    groups = (originals[:1], originals[1:2], originals[2:4], originals[4:6], originals[6:])
+    labels = ("Reference A", "Reference B", "Evaluation A", "Evaluation B", "Evaluation C")
+    rounds = [
+        replace(record, source=label, opponent=label)
+        for label, records in zip(labels, groups, strict=True)
+        for record in records
+    ]
+    return rounds, dict(zip(labels, labels, strict=True))
+
+
+def _render_g2_study(directory: Path) -> None:
+    paths = [directory / feed.filename for feed in G2_FEEDS]
+    sample = any(not path.is_file() for path in paths)
+    st.title("G2 on Split � Sample matches" if sample else "G2 jawgemo on Split")
+    if sample:
+        st.warning("FICTIONAL SAMPLE � The rounds below are invented.")
+        st.caption("Load the five official feeds to see the real patch 10.07 study.")
+        st.code(G2_FETCH_COMMAND, language="bash")
+        rounds, matches = _multi_match_sample()
+    else:
+        st.caption("2025 VCT Americas Stage 1 playoffs � Patch 10.07 � Match dates in UTC")
+        try:
+            rounds = _load_rounds(paths, "jawgemo")
+        except (OSError, UnicodeError, ValueError, zstandard.ZstdError) as exc:
+            st.error(f"Unable to read the G2 feeds. {exc}")
+            st.code(G2_FETCH_COMMAND, language="bash")
+            return
+        matches = G2_MATCHES
+
+    study = build_match_study(rounds, matches)
+    if study.circle is None:
+        st.info("The reference matches contain no located eligible contacts.")
+        return
+
+    reference = [
+        {"Reference match": label, "Eligible rounds": count}
+        for label, count in study.reference_counts.items()
+    ]
+    st.dataframe(reference, hide_index=True)
+    st.caption(f"The locked 15 m area covers {study.circle.coverage_count} of {len(study.reference_rounds)} reference rounds.")
+    revealed = st.checkbox("Reveal evaluation matches", key=f"g2_reveal_{sample}")
+    selected = None
+    if revealed:
+        summary = []
+        for label, rows in study.scored_matches.items():
+            summary.append(
+                {
+                    "Evaluation match": label,
+                    "Eligible": len(rows),
+                    "In area": sum(row.result == "hit" for row in rows),
+                    "Outside area": sum(row.result == "miss" for row in rows),
+                    "No early damage": sum(row.result == "no observed contact" for row in rows),
+                    "Position unavailable": sum(row.result == "contact has no position" for row in rows),
+                }
+            )
+        eligible = sum(row["Eligible"] for row in summary)
+        hits = sum(row["In area"] for row in summary)
+        misses = sum(row["Outside area"] for row in summary)
+        st.metric("Evaluation rounds in the locked area", f"{hits} of {eligible}")
+        st.dataframe(summary, hide_index=True)
+        if eligible and not hits and misses:
+            st.info(f"Review the {misses} first contacts outside the area before planning around the reference spot.")
+        match = st.selectbox("Inspect a match", list(study.scored_matches), key=f"g2_match_{sample}")
+        match_rounds = study.scored_matches[match]
+        if match_rounds:
+            st.dataframe([_round_row(row) for row in match_rounds], hide_index=True)
+            selected = st.selectbox(
+                "Inspect a round",
+                match_rounds,
+                format_func=lambda row: f"Round {row.record.number} � {row.result}",
+                index=None,
+                key=f"g2_round_{sample}_{match}",
+            )
+        else:
+            st.caption("No eligible defense rounds in this match.")
+
+    st.plotly_chart(_circle_figure(study, selected), config={"displayModeBar": False})
+    if selected is not None:
+        _render_round_detail(selected, "Sample player" if sample else "jawgemo")
+    st.caption("Enemy damage is the observable contact signal. The time window ends 20 seconds after barrier drop.")
+
+
 def main() -> None:
-    st.set_page_config(page_title="DGZ on Split", page_icon="🎯", layout="wide")
+    st.set_page_config(page_title="Operator Scout on Split", page_icon="??", layout="wide")
     directory = Path.cwd()
+    if st.radio("Scouting case", ("DGZ / LOUD", "jawgemo / G2"), horizontal=True) == "jawgemo / G2":
+        _render_g2_study(directory)
+        return
     missing = [feed.filename for feed in FEEDS if not (directory / feed.filename).is_file()]
     if missing:
         _set_dashboard_mode("sample")

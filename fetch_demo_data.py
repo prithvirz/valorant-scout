@@ -16,6 +16,7 @@ REPOSITORY = "cloud9esports/stl-hackathon-2026-grid-starter"
 COMMIT = "af2355877299e99b27e247951415e6fb5a40fc82"
 RAW_BASE_URL = f"https://raw.githubusercontent.com/{REPOSITORY}/{COMMIT}/val"
 FETCH_COMMAND = "python fetch_demo_data.py"
+G2_FETCH_COMMAND = "python fetch_demo_data.py --g2"
 CHUNK_SIZE = 1024 * 1024
 URL_TIMEOUT_SECONDS = 60
 
@@ -47,6 +48,23 @@ FEEDS = (
         "4c5a34d5f3113071ae02fac700da366646f9ff45",
         f"{RAW_BASE_URL}/events_2748757_grid.jsonl.zst",
     ),
+)
+
+
+G2_FEEDS = tuple(
+    DemoFeed(
+        f"events_{series_id}_grid.jsonl.zst",
+        size,
+        digest,
+        f"{RAW_BASE_URL}/events_{series_id}_grid.jsonl.zst",
+    )
+    for series_id, size, digest in (
+        (2775988, 1402728, "7d83755476777a97e5d39b0802f2582279f647c4"),
+        (2775990, 1624892, "c51de5b6cd96aa2766d8509ca27b3977677f6c78"),
+        (2775992, 1443953, "49f9360c5c6d9aa45b78fe30ba6c34e09f51602e"),
+        (2775993, 1950364, "0c696f9a4bf7925151d7b555ec704d644c4caef6"),
+        (2775994, 1919547, "4f75d74efafc922c5c472552fedf3c2ec72eefd7"),
+    )
 )
 
 
@@ -96,12 +114,12 @@ def _download_feed(feed: DemoFeed, destination: Path) -> None:
         temporary_path.unlink(missing_ok=True)
 
 
-def fetch_demo_data(destination: Path | None = None) -> None:
+def fetch_demo_data(destination: Path | None = None, *, g2: bool = False) -> None:
     output_directory = Path.cwd() if destination is None else Path(destination)
     if not output_directory.is_dir():
         raise FileNotFoundError(f"Destination folder does not exist: {output_directory}")
 
-    for feed in FEEDS:
+    for feed in G2_FEEDS if g2 else FEEDS:
         output_path = output_directory / feed.filename
         if _is_valid_copy(output_path, feed):
             print(f"Reusing valid {feed.filename}")
@@ -112,9 +130,10 @@ def fetch_demo_data(destination: Path | None = None) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.parse_args(argv)
+    parser.add_argument("--g2", action="store_true", help="fetch the five matches in the G2 Split study")
+    args = parser.parse_args(argv)
     try:
-        fetch_demo_data()
+        fetch_demo_data(g2=args.g2)
     except (OSError, FetchError) as exc:
         print(f"Unable to fetch GRID demo data: {exc}", file=sys.stderr)
         return 1

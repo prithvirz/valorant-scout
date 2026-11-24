@@ -17,7 +17,7 @@ python scout.py
 
 ## Dashboard
 
-Start the one-screen dashboard from any folder:
+Start the dashboard from the project folder:
 
 ```powershell
 python -m pip install -r requirements.txt
@@ -28,7 +28,7 @@ When all three GRID feeds are present in the current folder, the dashboard uses 
 
 To download the three pinned GRID demo feeds into the current folder, run `python fetch_demo_data.py`. The command downloads `events_2748743_grid.jsonl.zst`, `events_2748747_grid.jsonl.zst`, and `events_2748757_grid.jsonl.zst` from the [Cloud9 GRID starter repository](https://github.com/cloud9esports/stl-hackathon-2026-grid-starter), pinned to commit `af2355877299e99b27e247951415e6fb5a40fc82`. It verifies each file against the pinned Git blob SHA-1 and size, reuses valid local copies without network access, and replaces missing or invalid copies only after a complete download passes validation. Downloaded feeds remain local and are ignored by Git.
 
-Initially, it shows only the EG / KRÜ Split damage-contact evidence and the locked 15 m circle. Press **Reveal Sentinels match** to show the eligible-round headline and Sentinels results for rounds 5–10; selecting a round such as **Round 9** highlights its contact on the same plot and shows its timestamp, DGZ position, and time after barrier drop. Sentinels data is only scored after the reference area is fitted and never affects its center.
+Initially, it shows only the EG / KR� Split damage-contact evidence and the locked 15 m circle. Press **Reveal Sentinels match** to show the eligible-round headline and Sentinels results for rounds 5-10; selecting a round such as **Round 9** highlights its contact on the same plot and shows its timestamp, DGZ position, and time after barrier drop. Sentinels data is only scored after the reference area is fitted and never affects its center.
 
 The plot optionally uses `split_minimap.png`, Split's `displayIcon` from the [Valorant API map metadata](https://valorant-api.com/v1/maps/d960549e-485c-e861-8d71-aa9d1aed12a2). If the image is absent, the dashboard still shows the evidence, locked 15 m circle, reveal button, and selected Sentinels contact on a coordinate plot. GRID coordinates use the same projection in either view: `u = 0.842188 + y * 0.000078` and `v = 0.697578 - x * 0.000078`; the fitted circle is transformed without clipping and can extend beyond the image edges.
 
@@ -40,9 +40,22 @@ python scout.py events_2748743_grid.jsonl.zst events_2748747_grid.jsonl.zst even
 
 The CLI fits a 15-meter radius (1,500 map-unit) circle to eligible reference contacts and does not use Sentinels data when choosing its center. `--radius-m` and `--window-s` can change the radius and early-contact window.
 
+## G2 opponent study
+
+Select **jawgemo / G2** in the dashboard. The hosted app shows a labeled fictional example. To reproduce the real study, run the following commands from the project folder:
+
+```powershell
+python fetch_demo_data.py --g2
+python -m streamlit run dashboard.py
+```
+
+The five selected Split games are from VCT Americas Stage 1 2025 playoffs on patch 10.07. G2 was a Cloud9 opponent that season. We fit the circle on the two earliest matches, against Sentinels and 100 Thieves, then locked it before testing against Evil Geniuses, MIBR and Sentinels. The dashboard shows the eligible round count for each match, even if a match contributed zero rounds, and lets the coach inspect the exact timestamp and position of a located contact.
+
+The real result was **0 of 12 later eligible rounds in the area**. Four early contacts were outside it, and eight rounds had no observed early damage. The reference area came from one located contact across six eligible rounds, so the four later contacts are the better starting point for footage review. This is evidence about early damage locations in those matches. It does not identify the exact sightline or the weapon that dealt damage.
+
 ## Scoring definition
 
-- The reference set is Split rounds against Evil Geniuses or KRÜ where DGZ is defending and has an Operator in his game-level inventory at `round-ended-freezetime` (barrier drop).
+- The reference set is Split rounds against Evil Geniuses or KR� where DGZ is defending and has an Operator in his game-level inventory at `round-ended-freezetime` (barrier drop).
 - First contact means DGZ's earliest enemy `player-damaged-player` event at or after barrier drop and no more than 20 seconds later, whether DGZ deals or receives the damage. DGZ's position in that event is the contact point.
 - The CLI finds a maximum-coverage circle of the requested radius among reference points only. Ties use the lexicographically smallest rounded center `(x, y)` in map units.
 - Sentinels rounds are reported individually. An eligible round is a Split round where DGZ defends with an Operator at barrier drop. A located early contact within the fixed circle is a hit; one outside is a miss. No observed damage contact and contacts lacking coordinates are listed separately, not counted as misses.
