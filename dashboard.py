@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import math
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import plotly.graph_objects as go
@@ -18,6 +18,7 @@ from scout import (
     DEFAULT_WINDOW_SECONDS,
     MAP_UNITS_PER_METER,
     Circle,
+    Contact,
     RoundRecord,
     best_circle,
     load_rounds,
@@ -107,6 +108,55 @@ def _load_rounds(paths: list[Path]) -> list[RoundRecord]:
 
 def _timestamp_label(value: datetime) -> str:
     return value.isoformat().replace("+00:00", "Z")
+
+
+def _sample_rounds() -> list[RoundRecord]:
+    barrier_drop = datetime(2025, 1, 1, 20, 0, tzinfo=timezone.utc)
+
+    def make_round(
+        number: int,
+        opponent: str,
+        position: tuple[float, float] | None,
+        contact_observed: bool = True,
+    ) -> RoundRecord:
+        round_barrier = barrier_drop + timedelta(minutes=number)
+        contact = None
+        if contact_observed:
+            contact = Contact(
+                occurred_at=round_barrier + timedelta(seconds=17),
+                opponent=f"Fictional {opponent}",
+                position=position,
+            )
+        return RoundRecord(
+            source="invented sample data",
+            game_id=f"sample-{opponent.casefold().replace(' ', '-')}",
+            round_id=f"sample-round-{number}",
+            number=number,
+            map_name="Split",
+            dgz_id="sample-dgz",
+            dgz_team_id="sample-loud",
+            dgz_team="Sample LOUD",
+            opponent=opponent,
+            side="defender",
+            started_at=round_barrier - timedelta(seconds=30),
+            inventory={"operator"},
+            barrier_seen=True,
+            barrier_drop=round_barrier,
+            operator_at_drop=True,
+            contact=contact,
+            winner="Sample LOUD" if number % 2 else "Fictional opponent",
+        )
+
+    return [
+        make_round(1, "Sample Evil Geniuses", (0.0, 0.0)),
+        make_round(2, "Sample KRÜ", (400.0, 0.0)),
+        make_round(5, "Sample Sentinels", (100.0, 0.0)),
+        make_round(6, "Sample Sentinels", (4000.0, 4000.0)),
+        make_round(7, "Sample Sentinels", None, contact_observed=False),
+        make_round(8, "Sample Sentinels", None),
+        make_round(9, "Sample Sentinels", (200.0, 0.0)),
+        make_round(10, "Sample Sentinels", (-4000.0, 4000.0)),
+    ]
 
 
 def _project_grid_position(position: tuple[float, float]) -> tuple[float, float]:
@@ -231,7 +281,7 @@ def _circle_figure(data: DashboardData, selected_round: ScoredRound | None = Non
                 x=[x],
                 y=[y],
                 mode="markers",
-                name=f"Selected Sentinels R{selected_round.record.number} contact",
+                name=f"Selected {selected_round.record.opponent} R{selected_round.record.number} contact",
                 marker={
                     "color": "#fb7185",
                     "size": 18,
@@ -326,9 +376,13 @@ def _render_round_detail(row: ScoredRound) -> None:
     st.markdown(f"**Result:** {row.result.title()} · **Round winner:** {record.winner or 'Unknown'}")
 
 
-def _render_dashboard(data: DashboardData) -> None:
-    st.title("DGZ on Split")
-    st.caption("EG / KRÜ establish the locked area; Sentinels are scored against it without refitting.")
+def _render_dashboard(data: DashboardData, sample_mode: bool = False) -> None:
+    st.title("DGZ on Split · Sample match" if sample_mode else "DGZ on Split")
+    if sample_mode:
+        st.warning("SAMPLE MATCH — all teams, rounds, timestamps, and positions below are invented for demonstration.")
+        st.caption("Fictional EG / KRÜ reference rounds lock the area; a fictional Sentinels match is scored without refitting.")
+    else:
+        st.caption("EG / KRÜ establish the locked area; Sentinels are scored against it without refitting.")
 
     if data.circle is None:
         st.error("No located EG / KRÜ reference contacts are available to lock the area.")
@@ -357,7 +411,7 @@ def _render_dashboard(data: DashboardData) -> None:
             config={"displayModeBar": False},
         )
     with evidence_column:
-        st.markdown("#### EG / KRÜ evidence")
+        st.markdown("#### Invented EG / KRÜ reference evidence" if sample_mode else "#### EG / KRÜ evidence")
         evidence = []
         for record in data.reference_rounds:
             evidence.append(
@@ -383,16 +437,20 @@ def _render_dashboard(data: DashboardData) -> None:
         st.caption("● Inside locked area · × Outside locked area")
 
     st.divider()
-    if st.button("Reveal Sentinels match", type="primary", key="reveal_sentinels"):
+    reveal_label = "Reveal Sample match" if sample_mode else "Reveal Sentinels match"
+    if st.button(reveal_label, type="primary", key="reveal_sentinels"):
         st.session_state["sentinels_revealed"] = True
 
     if not st.session_state.get("sentinels_revealed", False):
-        st.caption("The Sentinels rounds stay hidden until you reveal the match.")
+        hidden_label = "The invented sample rounds stay hidden until you reveal the sample match." if sample_mode else (
+            "The Sentinels rounds stay hidden until you reveal the match."
+        )
+        st.caption(hidden_label)
         return
 
-    st.markdown("### Sentinels · Rounds 5–10")
+    st.markdown("### Sample Sentinels · Rounds 5–10 (invented)" if sample_mode else "### Sentinels · Rounds 5–10")
     if not data.revealed_rounds:
-        st.info("No Sentinels rounds 5–10 were found in the supplied feeds.")
+        st.info("No Sentinels rounds 5–10 were found in the supplied feeds." if not sample_mode else "No invented sample rounds are available.")
         return
 
     metric_columns = st.columns(3)
@@ -426,7 +484,11 @@ def _render_dashboard(data: DashboardData) -> None:
     )
     if selected is not None:
         _render_round_detail(selected)
-    st.caption("Damage events are the feed's observable contact proxy; no observed damage is not a miss.")
+    st.caption(
+        "Invented sample contacts are illustrative only; they do not represent match data."
+        if sample_mode
+        else "Damage events are the feed's observable contact proxy; no observed damage is not a miss."
+    )
 
 
 def _select_round(number: int) -> None:
@@ -438,14 +500,24 @@ def _show_fetch_command() -> None:
     st.code(FETCH_COMMAND, language="powershell")
 
 
+def _set_dashboard_mode(mode: str) -> None:
+    if st.session_state.get("dashboard_mode") != mode:
+        st.session_state["dashboard_mode"] = mode
+        st.session_state["sentinels_revealed"] = False
+        st.session_state.pop("selected_round_number", None)
+
+
 def main() -> None:
     st.set_page_config(page_title="DGZ on Split", page_icon="🎯", layout="wide")
     directory = Path.cwd()
     missing = [feed.filename for feed in FEEDS if not (directory / feed.filename).is_file()]
     if missing:
-        st.error(f"Missing required GRID feeds: {', '.join(missing)}.")
+        _set_dashboard_mode("sample")
+        st.info(f"Missing GRID feeds: {', '.join(missing)}. Showing a fictional sample match instead; no available feeds are mixed into it.")
         _show_fetch_command()
+        _render_dashboard(build_dashboard_data(_sample_rounds()), sample_mode=True)
         return
+    _set_dashboard_mode("grid")
     paths = [directory / feed.filename for feed in FEEDS]
     try:
         rounds = _load_rounds(paths)

@@ -17,15 +17,16 @@ python scout.py
 
 ## Dashboard
 
-Fetch the three pinned GRID demo feeds into the current folder, then start the one-screen dashboard:
+Start the one-screen dashboard from any folder:
 
 ```powershell
 python -m pip install -r requirements.txt
-python fetch_demo_data.py
 python -m streamlit run dashboard.py
 ```
 
-`fetch_demo_data.py` downloads `events_2748743_grid.jsonl.zst`, `events_2748747_grid.jsonl.zst`, and `events_2748757_grid.jsonl.zst` from the [Cloud9 GRID starter repository](https://github.com/cloud9esports/stl-hackathon-2026-grid-starter), pinned to commit `af2355877299e99b27e247951415e6fb5a40fc82`. It verifies each file against the pinned Git blob SHA-1 and size, reuses valid local copies without network access, and replaces missing or invalid copies only after a complete download passes validation. The dashboard lists any missing required feed and displays the fetch command; the downloaded feeds remain local and are ignored by Git.
+When all three GRID feeds are present in the current folder, the dashboard uses the real-feed workflow described below. If any feed is absent, it instead loads a clearly labeled **Sample match** with invented reference and evaluation rounds, timestamps, teams, and positions. The fictional sample demonstrates the locked area, reveal, and round inspection; it is not real match evidence. The dashboard also displays the command to fetch the feeds, and switches back to real data when all three are present. It never mixes a partial real-feed set with sample rounds.
+
+To download the three pinned GRID demo feeds into the current folder, run `python fetch_demo_data.py`. The command downloads `events_2748743_grid.jsonl.zst`, `events_2748747_grid.jsonl.zst`, and `events_2748757_grid.jsonl.zst` from the [Cloud9 GRID starter repository](https://github.com/cloud9esports/stl-hackathon-2026-grid-starter), pinned to commit `af2355877299e99b27e247951415e6fb5a40fc82`. It verifies each file against the pinned Git blob SHA-1 and size, reuses valid local copies without network access, and replaces missing or invalid copies only after a complete download passes validation. Downloaded feeds remain local and are ignored by Git.
 
 Initially, it shows only the EG / KRÜ Split damage-contact evidence and the locked 15 m circle. Press **Reveal Sentinels match** to show the eligible-round headline and Sentinels results for rounds 5–10; selecting a round such as **Round 9** highlights its contact on the same plot and shows its timestamp, DGZ position, and time after barrier drop. Sentinels data is only scored after the reference area is fitted and never affects its center.
 
